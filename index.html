@@ -1,0 +1,1502 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Template Engine Editor</title>
+
+        <link
+            rel="stylesheet"
+            href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.17/codemirror.min.css"
+        />
+        <link
+            rel="stylesheet"
+            href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.17/addon/hint/show-hint.min.css"
+        />
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.17/codemirror.min.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.17/addon/hint/show-hint.min.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.17/addon/mode/overlay.js"></script>
+        <link
+            href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=DM+Sans:wght@400;500;700&display=swap"
+            rel="stylesheet"
+        />
+
+        <style>
+            *,
+            *::before,
+            *::after {
+                box-sizing: border-box;
+                margin: 0;
+                padding: 0;
+            }
+
+            :root {
+                --bg: #13151a;
+                --surface: #1a1d24;
+                --surface2: #21252e;
+                --surface3: #282d38;
+                --border: #2d3240;
+                --border2: #363d50;
+                --accent: #7c9cbf; /* calm slate blue */
+                --accent-dim: rgba(124, 156, 191, 0.1);
+                --accent-border: rgba(124, 156, 191, 0.25);
+                --tab-editor: #7c9cbf; /* slate blue  — template.txt */
+                --tab-editor-dim: rgba(124, 156, 191, 0.1);
+                --tab-editor-border: rgba(124, 156, 191, 0.22);
+                --tab-preview: #82a892; /* sage green  — preview */
+                --tab-preview-dim: rgba(130, 168, 146, 0.1);
+                --tab-preview-border: rgba(130, 168, 146, 0.22);
+                --text: #b8bfcc;
+                --text-dim: #474f62;
+                --text-mid: #6b7589;
+                --green: #82a892;
+                --green-dim: rgba(130, 168, 146, 0.12);
+                --red: #b57a7a;
+                --red-dim: rgba(181, 122, 122, 0.12);
+                --blue: #7c9cbf;
+                --purple: #9d8fb5;
+                --font-mono: "IBM Plex Mono", monospace;
+                --font-ui: "DM Sans", sans-serif;
+            }
+
+            html,
+            body {
+                height: 100%;
+                overflow: hidden;
+            }
+
+            body {
+                background: var(--bg);
+                color: var(--text);
+                font-family: var(--font-ui);
+                display: grid;
+                grid-template-rows: 1fr 32px;
+                grid-template-columns: 1fr 320px;
+                grid-template-areas:
+                    "editor  sidebar"
+                    "footer  footer";
+                height: 100vh;
+            }
+
+            /* ── Editor column ─────────────────────────── */
+            .editor-col {
+                grid-area: editor;
+                display: flex;
+                flex-direction: column;
+                border-right: 1px solid var(--border);
+                overflow: hidden;
+            }
+
+            /* tabs — VS Code style */
+            .col-tabs {
+                display: flex;
+                align-items: flex-end;
+                height: 36px;
+                border-bottom: 1px solid var(--border);
+                background: var(--surface2);
+                flex-shrink: 0;
+                gap: 0;
+                padding: 0;
+            }
+
+            .ctab {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                padding: 0 16px;
+                height: 100%;
+                font-size: 0.8rem;
+                font-family: var(--font-mono);
+                color: var(--text-dim);
+                cursor: pointer;
+                border-top: 2px solid transparent;
+                border-right: 1px solid var(--border);
+                border-bottom: 1px solid transparent;
+                border-left: none;
+                background: var(--surface2);
+                transition:
+                    color 0.12s,
+                    background 0.12s;
+                box-sizing: border-box;
+                position: relative;
+                top: 1px; /* overlap the tab bar bottom border */
+            }
+
+            .ctab:first-child {
+                border-left: 1px solid var(--border);
+            }
+            .ctab:hover:not(.active) {
+                color: var(--text);
+                background: var(--surface3);
+            }
+
+            .ctab.active {
+                color: var(--tab-editor);
+                background: #13151a; /* exact match to --bg / CodeMirror background */
+                border-top-color: var(--tab-editor);
+                border-bottom-color: #13151a; /* paints over the tab bar bottom border */
+            }
+
+            .ctab[data-pane="preview"].active {
+                color: var(--tab-preview);
+                border-top-color: var(--tab-preview);
+            }
+            .ctab[data-pane="preview"].active .ctab-pip {
+                background: var(--tab-preview);
+            }
+
+            .ctab-pip {
+                width: 5px;
+                height: 5px;
+                border-radius: 50%;
+                background: currentColor;
+                opacity: 0.6;
+            }
+
+            /* panes */
+            .pane-host {
+                flex: 1;
+                position: relative;
+                overflow: hidden;
+            }
+
+            .pane {
+                position: absolute;
+                inset: 0;
+                display: none;
+                flex-direction: column;
+            }
+            .pane.active {
+                display: flex;
+            }
+
+            /* CodeMirror */
+            #cm-host {
+                flex: 1;
+                overflow: hidden;
+                display: flex;
+                flex-direction: column;
+            }
+
+            .CodeMirror {
+                flex: 1;
+                height: 100% !important;
+                background: var(--bg) !important;
+                color: var(--text) !important;
+                font-family: var(--font-mono) !important;
+                font-size: 16px !important;
+                line-height: 1.9 !important;
+                border: none !important;
+            }
+
+            .CodeMirror-scroll {
+                padding: 12px 0;
+            }
+            .CodeMirror-lines {
+                padding: 0 !important;
+            }
+            .CodeMirror-line {
+                padding: 0 20px !important;
+            }
+            .CodeMirror-gutter-wrapper {
+                padding-left: 6px !important;
+            }
+            .CodeMirror-gutters {
+                background: var(--bg) !important;
+                /*border-right: 1px solid var(--border) !important;*/
+                border-right: 1px solid transparent !important;
+                padding-right: 10px;
+            }
+            .CodeMirror-linenumber {
+                color: var(--text-dim) !important;
+                font-size: 16px !important;
+            }
+            .CodeMirror-cursor {
+                border-left: 2px solid #7c9cbf !important;
+            }
+            .CodeMirror-activeline-background {
+                background: rgba(124, 156, 191, 0.03) !important;
+            }
+
+            /* Fix selection */
+            .CodeMirror .CodeMirror-selected {
+                background: rgba(124, 156, 191, 0.16) !important;
+            }
+            .CodeMirror-focused .CodeMirror-selected {
+                background: rgba(124, 156, 191, 0.2) !important;
+            }
+
+            /* Fix first-char selection clipping caused by line padding */
+            .CodeMirror pre.CodeMirror-line,
+            .CodeMirror pre.CodeMirror-line-like {
+                padding: 0 20px !important;
+            }
+
+            /* Themed scrollbar for CodeMirror scroll area */
+            .CodeMirror-scroll::-webkit-scrollbar {
+                width: 6px;
+                height: 6px;
+            }
+            .CodeMirror-scroll::-webkit-scrollbar-track {
+                background: var(--bg);
+            }
+            .CodeMirror-scroll::-webkit-scrollbar-thumb {
+                background: var(--border2);
+                border-radius: 3px;
+            }
+            .CodeMirror-scroll::-webkit-scrollbar-thumb:hover {
+                background: #444950;
+            }
+            .CodeMirror-scroll::-webkit-scrollbar-corner {
+                background: var(--bg);
+            }
+
+            .cm-tpl-tag {
+                background: rgba(124, 156, 191, 0.12);
+                color: #9bb8d4 !important;
+                border-radius: 3px;
+                outline: 1px solid rgba(124, 156, 191, 0.28);
+                font-weight: 500;
+            }
+
+            .cm-tpl-unresolved {
+                background: rgba(181, 122, 122, 0.1);
+                color: #c49090 !important;
+                border-radius: 3px;
+                outline: 1px solid rgba(181, 122, 122, 0.25);
+            }
+
+            /* Preview pane */
+            .preview-wrap {
+                flex: 1;
+                overflow-y: auto;
+                padding: 28px 32px;
+                font-family: var(--font-ui);
+                font-size: 1.05rem;
+                line-height: 1.9;
+                color: var(--text);
+                background: var(--bg);
+            }
+
+            .preview-wrap .pv-resolved {
+                color: #9bb8d4;
+                font-weight: 600;
+                background: rgba(124, 156, 191, 0.1);
+                border-radius: 3px;
+                padding: 0 3px;
+            }
+
+            .preview-wrap .pv-unresolved {
+                color: var(--red);
+                background: var(--red-dim);
+                border-radius: 3px;
+                padding: 0 3px;
+                text-decoration: underline wavy rgba(224, 108, 117, 0.4);
+            }
+
+            /* Autocomplete */
+            .CodeMirror-hints {
+                background: #1a1c20 !important;
+                border: 1px solid var(--border2) !important;
+                border-radius: 8px !important;
+                box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6) !important;
+                font-family: var(--font-mono) !important;
+                font-size: 0.88rem !important;
+                padding: 4px !important;
+                z-index: 9999;
+                min-width: 200px;
+            }
+
+            .CodeMirror-hint {
+                color: var(--text) !important;
+                border-radius: 5px !important;
+                padding: 6px 12px !important;
+                display: flex !important;
+                align-items: center;
+                gap: 8px;
+            }
+
+            li.CodeMirror-hint-active {
+                background: var(--accent-dim) !important;
+                color: var(--accent) !important;
+            }
+
+            /* ── Hover tooltip ─────────────────────────── */
+            #cm-tooltip {
+                position: fixed;
+                z-index: 9999;
+                pointer-events: auto;
+                display: none;
+                flex-direction: column;
+                gap: 3px;
+                background: #1a1c22;
+                border: 1px solid var(--border2);
+                border-radius: 7px;
+                padding: 8px 12px;
+                box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+                font-family: var(--font-mono);
+                font-size: 0.75rem;
+                max-width: 240px;
+                /* invisible top extension to bridge the gap */
+                margin-top: -6px;
+                padding-top: 14px;
+            }
+
+            #cm-tooltip.visible {
+                display: flex;
+            }
+
+            .tt-key {
+                color: var(--accent);
+                font-weight: 600;
+                font-size: 0.8rem;
+            }
+
+            .tt-msg {
+                color: var(--text-dim);
+                line-height: 1.5;
+            }
+            .tt-msg b {
+                color: var(--red);
+                font-weight: 500;
+            }
+            .tt-hint {
+                color: var(--text-dim);
+                font-size: 0.68rem;
+                font-style: italic;
+                margin-top: 2px;
+            }
+
+            /* ── Sidebar ───────────────────────────────── */
+            .sidebar {
+                grid-area: sidebar;
+                display: flex;
+                flex-direction: column;
+                background: var(--surface);
+                overflow: hidden;
+            }
+
+            /* sidebar tabs */
+            .sidebar-tabs {
+                display: flex;
+                border-bottom: 1px solid var(--border);
+                flex-shrink: 0;
+            }
+
+            .stab {
+                flex: 1;
+                padding: 9px 0;
+                text-align: center;
+                font-size: 0.65rem;
+                font-family: var(--font-mono);
+                color: var(--text-dim);
+                cursor: pointer;
+                border-bottom: 2px solid transparent;
+                transition:
+                    color 0.12s,
+                    border-color 0.12s;
+                text-transform: uppercase;
+                letter-spacing: 0.08em;
+            }
+
+            .stab.active {
+                color: var(--tab-editor);
+                border-bottom-color: var(--tab-editor);
+            }
+
+            .spanel {
+                display: none;
+                flex-direction: column;
+                flex: 1;
+                overflow: hidden;
+            }
+            .spanel.active {
+                display: flex;
+            }
+
+            /* ── ADD VAR FORM ──────────────────────────── */
+            .add-form {
+                padding: 11px 12px;
+                border-bottom: 1px solid var(--border);
+                flex-shrink: 0;
+                display: flex;
+                flex-direction: column;
+                gap: 7px;
+            }
+
+            .add-form-row {
+                display: flex;
+                gap: 6px;
+            }
+
+            .fi {
+                flex: 1;
+                min-width: 0;
+                background: var(--surface2);
+                border: 1px solid var(--border);
+                border-radius: 5px;
+                padding: 5px 8px;
+                font-family: var(--font-mono);
+                font-size: 0.82rem;
+                color: var(--text);
+                outline: none;
+                transition: border-color 0.15s;
+            }
+
+            .fi:focus {
+                border-color: var(--tab-editor);
+            }
+            .fi::placeholder {
+                color: var(--text-dim);
+            }
+            .fi-sm {
+                flex: 0 0 85px;
+            }
+
+            .btn-add {
+                padding: 5px 10px;
+                background: var(--tab-editor);
+                color: #0e1117;
+                border: none;
+                border-radius: 5px;
+                font-size: 0.7rem;
+                font-weight: 700;
+                font-family: var(--font-ui);
+                cursor: pointer;
+                white-space: nowrap;
+                flex-shrink: 0;
+                transition: opacity 0.15s;
+            }
+
+            .btn-add:hover {
+                opacity: 0.8;
+            }
+
+            .add-hint {
+                font-size: 0.6rem;
+                color: var(--text-dim);
+                font-family: var(--font-mono);
+            }
+
+            /* ── TREE VIEW ─────────────────────────────── */
+            .tree-host {
+                flex: 1;
+                overflow-y: auto;
+                padding: 6px 0;
+            }
+
+            /* Group node */
+            .tree-group {
+                margin: 0;
+            }
+
+            .tree-group-row {
+                display: flex;
+                align-items: center;
+                gap: 0;
+                padding: 5px 10px;
+                cursor: pointer;
+                user-select: none;
+                transition: background 0.1s;
+                border-radius: 0;
+            }
+
+            .tree-group-row:hover {
+                background: var(--surface2);
+            }
+
+            .tree-toggle {
+                width: 16px;
+                height: 16px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                flex-shrink: 0;
+                font-size: 0.45rem;
+                color: var(--text-dim);
+                transition: transform 0.18s;
+            }
+
+            .tree-group.open > .tree-group-row .tree-toggle {
+                transform: rotate(90deg);
+            }
+
+            /* folder icon */
+            .tree-icon {
+                font-size: 0.65rem;
+                margin-right: 6px;
+                flex-shrink: 0;
+            }
+
+            .tree-group-name {
+                font-family: var(--font-mono);
+                font-size: 0.82rem;
+                color: var(--blue);
+                font-weight: 500;
+                flex: 1;
+            }
+
+            .tree-badge {
+                font-size: 0.58rem;
+                font-family: var(--font-mono);
+                color: var(--text-dim);
+                background: var(--surface3);
+                border-radius: 3px;
+                padding: 1px 4px;
+            }
+
+            /* Children container */
+            .tree-children {
+                display: none;
+            }
+            .tree-group.open > .tree-children {
+                display: block;
+            }
+
+            /* leaf/variable node */
+            .tree-leaf {
+                display: flex;
+                align-items: center;
+                padding: 4px 10px 4px 32px;
+                transition: background 0.1s;
+                border-radius: 0;
+                gap: 0;
+            }
+
+            .tree-leaf:hover {
+                background: var(--surface2);
+            }
+
+            /* tree lines */
+            .tree-line {
+                width: 16px;
+                flex-shrink: 0;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                position: relative;
+                align-self: stretch;
+            }
+
+            .tree-line::before {
+                content: "";
+                position: absolute;
+                left: 50%;
+                top: 0;
+                bottom: 0;
+                width: 1px;
+                background: var(--border2);
+            }
+
+            .tree-line.last::before {
+                bottom: 50%;
+            }
+
+            .tree-line::after {
+                content: "";
+                position: absolute;
+                left: 50%;
+                top: 50%;
+                width: 8px;
+                height: 1px;
+                background: var(--border2);
+            }
+
+            .tree-var-icon {
+                font-size: 0.5rem;
+                color: var(--tab-editor);
+                margin-right: 6px;
+                opacity: 0.6;
+                flex-shrink: 0;
+            }
+
+            .tree-var-name {
+                font-family: var(--font-mono);
+                font-size: 0.82rem;
+                color: var(--tab-editor);
+                min-width: 60px;
+                flex-shrink: 0;
+            }
+
+            .tree-eq {
+                font-family: var(--font-mono);
+                font-size: 0.78rem;
+                color: var(--text-dim);
+                margin: 0 6px;
+                flex-shrink: 0;
+            }
+
+            .tree-val-input {
+                flex: 1;
+                min-width: 0;
+                background: transparent;
+                border: none;
+                border-bottom: 1px dashed var(--border2);
+                font-family: var(--font-mono);
+                font-size: 0.82rem;
+                color: var(--green);
+                outline: none;
+                padding: 1px 2px;
+                transition:
+                    border-color 0.15s,
+                    color 0.15s;
+            }
+
+            .tree-val-input:focus {
+                border-bottom-color: var(--accent);
+                color: var(--text);
+            }
+            .tree-val-input::placeholder {
+                color: var(--text-dim);
+            }
+
+            .tree-del {
+                background: none;
+                border: none;
+                color: var(--text-dim);
+                cursor: pointer;
+                font-size: 0.55rem;
+                padding: 2px 4px;
+                flex-shrink: 0;
+                transition: color 0.1s;
+                opacity: 0;
+            }
+
+            .tree-leaf:hover .tree-del {
+                opacity: 1;
+            }
+            .tree-del:hover {
+                color: var(--red);
+            }
+
+            .tree-empty {
+                padding: 14px 14px;
+                font-size: 0.68rem;
+                color: var(--text-dim);
+                font-family: var(--font-mono);
+            }
+
+            /* ── Footer ────────────────────────────────── */
+            footer {
+                grid-area: footer;
+                display: flex;
+                align-items: center;
+                gap: 16px;
+                padding: 0 16px;
+                border-top: 1px solid var(--border);
+                background: var(--surface);
+                font-size: 0.8rem;
+                font-family: var(--font-mono);
+                color: var(--text-dim);
+            }
+
+            .fst {
+                display: flex;
+                align-items: center;
+                gap: 4px;
+            }
+            .fst b {
+                color: var(--text);
+                font-weight: 400;
+            }
+            .status-pip {
+                width: 5px;
+                height: 5px;
+                border-radius: 50%;
+                background: var(--green);
+            }
+            .f-warn {
+                color: var(--red);
+                display: none;
+                align-items: center;
+                gap: 4px;
+            }
+
+            /* ── Combobox ──────────────────────────────── */
+            .combobox {
+                position: relative;
+                flex: 0 0 85px;
+            }
+
+            .combobox-input {
+                width: 100%;
+                flex: unset;
+            }
+
+            .combobox-dropdown {
+                display: none;
+                position: absolute;
+                top: calc(100% + 4px);
+                left: 0;
+                min-width: 140px;
+                background: #1a1c20;
+                border: 1px solid var(--border2);
+                border-radius: 7px;
+                box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+                z-index: 9999;
+                overflow: hidden;
+                padding: 3px;
+            }
+
+            .combobox-dropdown.open {
+                display: block;
+            }
+
+            .cb-item {
+                display: flex;
+                align-items: center;
+                gap: 7px;
+                padding: 6px 10px;
+                font-family: var(--font-mono);
+                font-size: 0.7rem;
+                color: var(--text);
+                cursor: pointer;
+                border-radius: 5px;
+                transition: background 0.1s;
+            }
+
+            .cb-item:hover,
+            .cb-item.active {
+                background: var(--accent-dim);
+                color: var(--accent);
+            }
+
+            .cb-item-icon {
+                font-size: 0.5rem;
+                opacity: 0.5;
+            }
+
+            .cb-divider {
+                height: 1px;
+                background: var(--border);
+                margin: 3px 6px;
+            }
+
+            .cb-new {
+                color: var(--text-dim);
+                font-style: italic;
+            }
+
+            .cb-new span {
+                color: var(--accent);
+                font-style: normal;
+            }
+
+            ::-webkit-scrollbar {
+                width: 4px;
+                height: 4px;
+            }
+            ::-webkit-scrollbar-track {
+                background: transparent;
+            }
+            ::-webkit-scrollbar-thumb {
+                background: var(--border2);
+                border-radius: 2px;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="cm-tooltip">
+            <div class="tt-key" id="tt-key"></div>
+            <div class="tt-msg" id="tt-msg"></div>
+            <div class="tt-hint" id="tt-hint"></div>
+        </div>
+
+        <!-- ── Editor column ── -->
+        <div class="editor-col">
+            <div class="col-tabs">
+                <div class="ctab active" data-pane="editor">template</div>
+                <div class="ctab" data-pane="preview">preview</div>
+            </div>
+            <div class="pane-host">
+                <div class="pane active" id="pane-editor">
+                    <div id="cm-host"><textarea id="cm-ta"></textarea></div>
+                </div>
+                <div class="pane" id="pane-preview">
+                    <div class="preview-wrap" id="preview-out"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── Sidebar ── -->
+        <div class="sidebar">
+            <div class="sidebar-tabs">
+                <div class="stab active" data-panel="vars">Variables</div>
+            </div>
+
+            <!-- Variables panel -->
+            <div class="spanel active" id="panel-vars">
+                <!-- Add form -->
+                <div class="add-form">
+                    <div class="add-form-row">
+                        <div class="combobox fi-sm" id="group-combobox">
+                            <input
+                                class="fi combobox-input"
+                                id="fi-group"
+                                type="text"
+                                placeholder="group"
+                                autocomplete="off"
+                            />
+                            <div
+                                class="combobox-dropdown"
+                                id="group-dropdown"
+                            ></div>
+                        </div>
+                        <input
+                            class="fi"
+                            id="fi-name"
+                            type="text"
+                            placeholder="variable name"
+                        />
+                    </div>
+                    <div class="add-form-row">
+                        <input
+                            class="fi"
+                            id="fi-value"
+                            type="text"
+                            placeholder="value (optional)"
+                        />
+                        <button class="btn-add" id="btn-add">+ Add</button>
+                    </div>
+                    <div class="add-hint">
+                        No group → "global". Tab between fields
+                    </div>
+                </div>
+                <!-- Tree -->
+                <div class="tree-host" id="tree-host">
+                    <div class="tree-empty">No variables yet.</div>
+                </div>
+            </div>
+        </div>
+
+        <footer>
+            <div class="fst">Lines: <b id="f-lines">—</b></div>
+            <div class="fst">Chars: <b id="f-chars">—</b></div>
+            <div class="fst">Vars: <b id="f-vars">—</b></div>
+            <div class="f-warn" id="f-warn">
+                ⚠ <b id="f-unres">0</b> unresolved
+            </div>
+        </footer>
+
+        <script>
+            // ══════════════════════════════════════════════════
+            // STORE  { group: { varName: value } }
+            // ══════════════════════════════════════════════════
+            const store = {};
+
+            function setVar(group, name, value) {
+                if (!store[group]) store[group] = {};
+                store[group][name] = value;
+            }
+
+            function delVar(group, name) {
+                if (store[group]) {
+                    delete store[group][name];
+                    if (!Object.keys(store[group]).length) delete store[group];
+                }
+            }
+
+            function resolveKey(key) {
+                // key = 'client.name' or 'city'
+                const dot = key.indexOf(".");
+                if (dot === -1)
+                    return store["global"] ? store["global"][key] : undefined;
+                const g = key.slice(0, dot),
+                    n = key.slice(dot + 1);
+                return store[g] ? store[g][n] : undefined;
+            }
+
+            function allKeys() {
+                const out = [];
+                for (const g in store)
+                    for (const n in store[g])
+                        out.push(g === "global" ? n : `${g}.${n}`);
+                return out;
+            }
+
+            // ══════════════════════════════════════════════════
+            // UTILS
+            // ══════════════════════════════════════════════════
+            function esc(s) {
+                return String(s)
+                    .replace(/&/g, "&amp;")
+                    .replace(/</g, "&lt;")
+                    .replace(/>/g, "&gt;")
+                    .replace(/"/g, "&quot;");
+            }
+
+            function getTags(text) {
+                return [
+                    ...new Set(
+                        [...text.matchAll(/-(.*?)-/g)]
+                            .map((m) => m[1].trim())
+                            .filter(Boolean),
+                    ),
+                ];
+            }
+
+            // ══════════════════════════════════════════════════
+            // CODEMIRROR MODE
+            // ══════════════════════════════════════════════════
+            CodeMirror.defineMode("tpl", function (cfg) {
+                const overlay = {
+                    token(stream) {
+                        if (stream.match(/^-/)) {
+                            let buf = "";
+                            while (!stream.eol()) {
+                                const ch = stream.next();
+                                if (ch === "-") {
+                                    const key = buf.trim();
+                                    if (!key) return null;
+                                    const val = resolveKey(key);
+                                    return val !== undefined && val !== ""
+                                        ? "tpl-tag"
+                                        : "tpl-unresolved";
+                                }
+                                buf += ch;
+                            }
+                            return null;
+                        }
+                        while (!stream.eol() && stream.peek() !== "-")
+                            stream.next();
+                        return null;
+                    },
+                };
+                return CodeMirror.overlayMode(
+                    CodeMirror.getMode(cfg, "text/plain"),
+                    overlay,
+                );
+            });
+
+            // ══════════════════════════════════════════════════
+            // CODEMIRROR INIT
+            // ══════════════════════════════════════════════════
+            const DEMO = `Hello, - client.name -!
+
+We are happy to welcome you to - company.name -.
+Your email on file is - client.email -.
+
+If you have questions please reach out anytime.
+
+Warm regards,
+- our.name -
+- our.title -`;
+
+            const cm = CodeMirror.fromTextArea(
+                document.getElementById("cm-ta"),
+                {
+                    mode: "tpl",
+                    lineNumbers: true,
+                    lineWrapping: true,
+                    autofocus: true,
+                    inputStyle: "textarea",
+                    extraKeys: { "Ctrl-Space": doHint },
+                },
+            );
+
+            cm.setValue(DEMO);
+
+            // ══════════════════════════════════════════════════
+            // HOVER TOOLTIP on unresolved tags
+            // ══════════════════════════════════════════════════
+            const tooltip = document.getElementById("cm-tooltip");
+            const ttKey = document.getElementById("tt-key");
+            const ttMsg = document.getElementById("tt-msg");
+            const ttHint = document.getElementById("tt-hint");
+            let tooltipTimer = null;
+
+            function unresolvedReason(key) {
+                const dot = key.indexOf(".");
+                if (dot === -1) {
+                    // global var
+                    if (!store["global"] || store["global"][key] === undefined)
+                        return {
+                            msg: `Variable <b>${key}</b> is not defined.`,
+                            hint: `Add it as a global variable.`,
+                        };
+                    if (store["global"][key] === "")
+                        return {
+                            msg: `Variable <b>${key}</b> has no value.`,
+                            hint: `Set a value in the Variables panel.`,
+                        };
+                } else {
+                    const g = key.slice(0, dot),
+                        n = key.slice(dot + 1);
+                    if (!store[g])
+                        return {
+                            msg: `Group <b>${g}</b> does not exist.`,
+                            hint: `Create it in the Variables panel.`,
+                        };
+                    if (store[g][n] === undefined)
+                        return {
+                            msg: `<b>${n}</b> is not defined in group <b>${g}</b>.`,
+                            hint: `Add it under the "${g}" group.`,
+                        };
+                    if (store[g][n] === "")
+                        return {
+                            msg: `<b>${g}.${n}</b> has no value.`,
+                            hint: `Set a value in the Variables panel.`,
+                        };
+                }
+                return null;
+            }
+
+            cm.getWrapperElement().addEventListener("mousemove", (e) => {
+                const target = e.target;
+                // Only trigger on unresolved spans
+                if (!target.classList.contains("cm-tpl-unresolved")) {
+                    hideTooltip();
+                    return;
+                }
+
+                const key = target.textContent
+                    .replace(/^-\s*/, "")
+                    .replace(/\s*-$/, "")
+                    .trim();
+                if (!key) {
+                    hideTooltip();
+                    return;
+                }
+
+                const reason = unresolvedReason(key);
+                if (!reason) {
+                    hideTooltip();
+                    return;
+                }
+
+                clearTimeout(tooltipTimer);
+                tooltipTimer = setTimeout(() => {
+                    ttKey.textContent = `- ${key} -`;
+                    ttMsg.innerHTML = reason.msg;
+                    ttHint.textContent = reason.hint;
+
+                    // position near cursor
+                    const rect = target.getBoundingClientRect();
+                    let left = rect.left;
+                    let top = rect.bottom + 8;
+
+                    // keep inside viewport
+                    if (left + 250 > window.innerWidth)
+                        left = window.innerWidth - 256;
+                    if (top + 100 > window.innerHeight) top = rect.top - 80;
+
+                    tooltip.style.left = left + "px";
+                    tooltip.style.top = top + "px";
+                    tooltip.classList.add("visible");
+                }, 180);
+            });
+
+            cm.getWrapperElement().addEventListener("mouseleave", (e) => {
+                // don't hide if moving into the tooltip itself
+                if (e.relatedTarget && tooltip.contains(e.relatedTarget))
+                    return;
+                hideTooltip();
+            });
+
+            tooltip.addEventListener("mouseleave", (e) => {
+                if (
+                    e.relatedTarget &&
+                    cm.getWrapperElement().contains(e.relatedTarget)
+                )
+                    return;
+                hideTooltip();
+            });
+
+            function hideTooltip() {
+                clearTimeout(tooltipTimer);
+                tooltip.classList.remove("visible");
+            }
+            // ══════════════════════════════════════════════════
+            function doHint(editor) {
+                CodeMirror.showHint(editor, templateHint, {
+                    completeSingle: false,
+                });
+            }
+
+            function templateHint(editor) {
+                const cursor = editor.getCursor();
+                const line = editor.getLine(cursor.line);
+                const before = line.slice(0, cursor.ch);
+                const di = before.lastIndexOf("-");
+                if (di === -1) return;
+                const between = before.slice(di + 1);
+                if (between.includes("-")) return;
+                const query = between.trimStart().toLowerCase();
+
+                const list = allKeys()
+                    .filter((k) => k.toLowerCase().includes(query))
+                    .map((k) => {
+                        const val = resolveKey(k);
+                        return {
+                            text: `- ${k} -`,
+                            displayText: k,
+                            render(el) {
+                                el.innerHTML =
+                                    `<span style="color:var(--accent);font-family:var(--font-mono)">${esc(k)}</span>` +
+                                    (val
+                                        ? `<span style="color:var(--text-dim);font-size:0.8em;margin-left:8px">${esc(val)}</span>`
+                                        : "");
+                            },
+                            hint(cm) {
+                                cm.replaceRange(
+                                    `- ${k} -`,
+                                    { line: cursor.line, ch: di },
+                                    { line: cursor.line, ch: cursor.ch },
+                                );
+                            },
+                        };
+                    });
+
+                if (!list.length) return;
+                return {
+                    list,
+                    from: CodeMirror.Pos(cursor.line, di),
+                    to: CodeMirror.Pos(cursor.line, cursor.ch),
+                };
+            }
+
+            cm.on("inputRead", (editor, change) => {
+                if (change.origin !== "+input") return;
+                const ch = change.text[0];
+                if (ch === "-" || ch === " ")
+                    setTimeout(() => doHint(editor), 50);
+            });
+
+            // ══════════════════════════════════════════════════
+            // SYNC — called after any change to doc or store
+            // ══════════════════════════════════════════════════
+            function syncAll() {
+                const text = cm.getValue();
+
+                // refresh mode so colours update immediately
+                cm.setOption("mode", "tpl");
+
+                // footer
+                const tags = getTags(text);
+                const unresolved = tags.filter((k) => {
+                    if (!k) return false; // skip empty
+                    const v = resolveKey(k);
+                    return v === undefined || v === "";
+                });
+
+                document.getElementById("f-lines").textContent = cm.lineCount();
+                document.getElementById("f-chars").textContent = text.length;
+                document.getElementById("f-vars").textContent =
+                    allKeys().length;
+
+                const fw = document.getElementById("f-warn");
+                fw.style.display = unresolved.length ? "flex" : "none";
+                document.getElementById("f-unres").textContent =
+                    unresolved.length;
+
+                // preview
+                renderPreview(text);
+            }
+
+            cm.on("change", syncAll);
+
+            // ══════════════════════════════════════════════════
+            // PREVIEW
+            // ══════════════════════════════════════════════════
+            function renderPreview(text) {
+                const html = esc(text)
+                    .replace(/\n/g, "<br>")
+                    .replace(/-(.*?)-/g, (match, inner) => {
+                        const key = inner.trim();
+                        if (!key) return match;
+                        const val = resolveKey(key);
+                        if (val !== undefined && val !== "")
+                            return `<span class="pv-resolved">${esc(val)}</span>`;
+                        return match;
+                    });
+                document.getElementById("preview-out").innerHTML = html;
+            }
+
+            // ══════════════════════════════════════════════════
+            // TREE VIEW — variables panel
+            // ══════════════════════════════════════════════════
+            const treeOpen = {}; // track which groups are open
+
+            function renderTree() {
+                const host = document.getElementById("tree-host");
+                const groups = Object.keys(store);
+
+                if (!groups.length) {
+                    host.innerHTML =
+                        '<div class="tree-empty">No variables yet.</div>';
+                    return;
+                }
+
+                host.innerHTML = groups
+                    .map((g) => {
+                        const vars = store[g];
+                        const names = Object.keys(vars);
+                        if (treeOpen[g] === undefined) treeOpen[g] = true; // default open
+                        const isOpen = treeOpen[g];
+
+                        return `
+      <div class="tree-group ${isOpen ? "open" : ""}" data-g="${esc(g)}">
+        <div class="tree-group-row" onclick="toggleTreeGroup('${esc(g)}')">
+          <span class="tree-toggle">▶</span>
+          <span class="tree-icon">📁</span>
+          <span class="tree-group-name">${esc(g)}</span>
+          <span class="tree-badge">${names.length}</span>
+        </div>
+        <div class="tree-children">
+          ${names
+              .map((n, i) => {
+                  const isLast = i === names.length - 1;
+                  const fullKey = g === "global" ? n : `${g}.${n}`;
+                  return `
+              <div class="tree-leaf">
+                <div class="tree-line ${isLast ? "last" : ""}"></div>
+                <span class="tree-var-icon">◆</span>
+                <span class="tree-var-name">${esc(n)}</span>
+                <span class="tree-eq">=</span>
+                <input
+                  class="tree-val-input"
+                  type="text"
+                  placeholder="empty…"
+                  value="${esc(vars[n])}"
+                  data-g="${esc(g)}" data-n="${esc(n)}"
+                  oninput="onValueInput(this)"
+                />
+                <button class="tree-del" onclick="onDelVar('${esc(g)}','${esc(n)}')" title="Delete">✕</button>
+              </div>
+            `;
+              })
+              .join("")}
+        </div>
+      </div>
+    `;
+                    })
+                    .join("");
+            }
+
+            function toggleTreeGroup(g) {
+                treeOpen[g] = !treeOpen[g];
+                renderTree();
+            }
+
+            function onValueInput(el) {
+                const g = el.dataset.g,
+                    n = el.dataset.n;
+                store[g][n] = el.value;
+                syncAll();
+            }
+
+            function onDelVar(g, n) {
+                delVar(g, n);
+                renderTree();
+                syncAll();
+            }
+
+            // ══════════════════════════════════════════════════
+            // COMBOBOX — group input
+            // ══════════════════════════════════════════════════
+            const cbInput = document.getElementById("fi-group");
+            const cbDropdown = document.getElementById("group-dropdown");
+            let cbActiveIdx = -1;
+            let cbItems = [];
+
+            function getGroupOptions(query) {
+                const existing = Object.keys(store);
+                const q = query.toLowerCase();
+                const filtered = existing.filter((g) => g.includes(q));
+                return filtered;
+            }
+
+            function renderCombobox(query) {
+                const options = getGroupOptions(query);
+                const showNew = query && !options.includes(query.toLowerCase());
+
+                cbItems = [...options];
+                if (showNew) cbItems.push("__new__");
+
+                if (!cbItems.length && !showNew) {
+                    cbDropdown.classList.remove("open");
+                    return;
+                }
+
+                cbDropdown.innerHTML = [
+                    ...options.map(
+                        (g, i) => `
+      <div class="cb-item" data-idx="${i}" data-value="${esc(g)}">
+        <span class="cb-item-icon">📁</span>${esc(g)}
+      </div>
+    `,
+                    ),
+                    showNew && options.length
+                        ? '<div class="cb-divider"></div>'
+                        : "",
+                    showNew
+                        ? `
+      <div class="cb-item cb-new" data-idx="${options.length}" data-value="${esc(query)}">
+        <span class="cb-item-icon">✚</span>Create <span>"${esc(query)}"</span>
+      </div>
+    `
+                        : "",
+                ].join("");
+
+                cbActiveIdx = -1;
+                cbDropdown.classList.add("open");
+
+                cbDropdown.querySelectorAll(".cb-item").forEach((el) => {
+                    el.addEventListener("mousedown", (e) => {
+                        e.preventDefault();
+                        cbInput.value = el.dataset.value;
+                        cbDropdown.classList.remove("open");
+                        document.getElementById("fi-name").focus();
+                    });
+                });
+            }
+
+            cbInput.addEventListener("input", () =>
+                renderCombobox(cbInput.value.trim()),
+            );
+            cbInput.addEventListener("focus", () =>
+                renderCombobox(cbInput.value.trim()),
+            );
+
+            cbInput.addEventListener("keydown", (e) => {
+                const items = cbDropdown.querySelectorAll(".cb-item");
+                if (!items.length) return;
+
+                if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    cbActiveIdx = (cbActiveIdx + 1) % items.length;
+                    items.forEach((el, i) =>
+                        el.classList.toggle("active", i === cbActiveIdx),
+                    );
+                } else if (e.key === "ArrowUp") {
+                    e.preventDefault();
+                    cbActiveIdx =
+                        (cbActiveIdx - 1 + items.length) % items.length;
+                    items.forEach((el, i) =>
+                        el.classList.toggle("active", i === cbActiveIdx),
+                    );
+                } else if (e.key === "Enter" && cbActiveIdx >= 0) {
+                    e.preventDefault();
+                    cbInput.value = items[cbActiveIdx].dataset.value;
+                    cbDropdown.classList.remove("open");
+                    document.getElementById("fi-name").focus();
+                } else if (e.key === "Escape") {
+                    cbDropdown.classList.remove("open");
+                } else if (e.key === "Tab") {
+                    // pick active or just close
+                    if (cbActiveIdx >= 0)
+                        cbInput.value = items[cbActiveIdx].dataset.value;
+                    cbDropdown.classList.remove("open");
+                }
+            });
+
+            document.addEventListener("click", (e) => {
+                if (
+                    !document
+                        .getElementById("group-combobox")
+                        .contains(e.target)
+                ) {
+                    cbDropdown.classList.remove("open");
+                }
+            });
+
+            // ══════════════════════════════════════════════════
+            // ADD VAR FORM
+            // ══════════════════════════════════════════════════
+            document
+                .getElementById("btn-add")
+                .addEventListener("click", doAddVar);
+
+            document
+                .getElementById("fi-group")
+                .addEventListener("keydown", (e) => {
+                    if (e.key === "Enter" || e.key === "Tab") {
+                        e.preventDefault();
+                        document.getElementById("fi-name").focus();
+                    }
+                });
+
+            document
+                .getElementById("fi-name")
+                .addEventListener("keydown", (e) => {
+                    if (e.key === "Enter" || e.key === "Tab") {
+                        e.preventDefault();
+                        document.getElementById("fi-value").focus();
+                    }
+                });
+
+            document
+                .getElementById("fi-value")
+                .addEventListener("keydown", (e) => {
+                    if (e.key === "Enter") {
+                        e.preventDefault();
+                        doAddVar();
+                    }
+                });
+
+            function doAddVar() {
+                const g =
+                    document
+                        .getElementById("fi-group")
+                        .value.trim()
+                        .toLowerCase()
+                        .replace(/\s+/g, "_") || "global";
+                const n = document
+                    .getElementById("fi-name")
+                    .value.trim()
+                    .toLowerCase()
+                    .replace(/\s+/g, "_");
+                const v = document.getElementById("fi-value").value.trim();
+                if (!n) {
+                    document.getElementById("fi-name").focus();
+                    return;
+                }
+
+                setVar(g, n, v);
+                document.getElementById("fi-name").value = "";
+                document.getElementById("fi-value").value = "";
+                document.getElementById("fi-name").focus();
+
+                renderTree();
+                renderCombobox(cbInput.value.trim());
+                syncAll();
+            }
+
+            // ══════════════════════════════════════════════════
+            // TAB SWITCHING
+            // ══════════════════════════════════════════════════
+
+            document.querySelectorAll(".ctab").forEach((tab) => {
+                tab.addEventListener("click", () => {
+                    document
+                        .querySelectorAll(".ctab")
+                        .forEach((t) => t.classList.remove("active"));
+                    document
+                        .querySelectorAll(".pane")
+                        .forEach((p) => p.classList.remove("active"));
+                    tab.classList.add("active");
+                    const pane = document.getElementById(
+                        `pane-${tab.dataset.pane}`,
+                    );
+                    pane.classList.add("active");
+                    if (tab.dataset.pane === "editor")
+                        setTimeout(() => cm.refresh(), 10);
+                    if (tab.dataset.pane === "preview")
+                        renderPreview(cm.getValue());
+                });
+            });
+
+            // ══════════════════════════════════════════════════
+            // SEED DATA
+            // ══════════════════════════════════════════════════
+            setVar("client", "name", "Mehedi");
+            setVar("client", "email", "mehedi.deslop@gmail.com");
+            setVar("company", "name", "deslop");
+            setVar("our", "name", "Desloper");
+            setVar("our", "title", "We design and develop");
+
+            renderTree();
+            syncAll();
+        </script>
+    </body>
+</html>
